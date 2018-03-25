@@ -9,11 +9,11 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace LearningSSL
 {
-    class Program
+    partial class Program
     {
         static void Main(string[] args)
         {
-
+            X509ContentDemonstration();
         }
     }
 }
