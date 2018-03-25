@@ -75,10 +75,10 @@ namespace LearningSSL
                 }
             };
 
-            // __review();
+            __review();
 
             /// Use windows sdk to create self-signed cert
-            ///     - makecert -r -sv test.pvk -n "CN=KTLiang" test.cert -a md5
+            ///     - makecert -r -sv test.pvk -n "CN=KTLiang" test.cer
             ///     - pvk2pfx -pvk test.pvk -spc test.cer -pfx test.pfx -po 123
             ///     - cer: public key file (no private key)
             ///     - pvk: private key file
@@ -88,29 +88,81 @@ namespace LearningSSL
             var cerFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test.cer");
             var pfxFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test.pfx");
 
-            /// Experiment
-            ///     - The cert has been applied MD5 as the hash algorithm
-            ///     - Imitate the transmission of content
+            /// Recipient
+            ///     - Cert file has been sent from server and received by client
+            ///     - Only public key info is included in the cert
 
-            var hashBytes = MD5.Create().ComputeHash(contentBytes);
-            var hash = Convert.ToBase64String(hashBytes);
+            var clientReceivedCert = new X509Certificate2(cerFile, "123");
+            var cerRSA = clientReceivedCert.GetRSAPublicKey();
 
-            Console.WriteLine("{0} => hash-to: {1}", content, hash);
+            /// Client accepts the cert and raise a challenge to server 
+            ///     - Use public key to encrypt a text
+            ///     - If server is the holder of private key, it should be able to decrypt and show back the content
 
+            content = "hello, server.";
+            contentBytes = Encoding.UTF8.GetBytes(content);
 
-            var certificate = new X509Certificate2(pfxFile, "123");
-            
+            cipherBytes = cerRSA.Encrypt(contentBytes, RSAEncryptionPadding.OaepSHA1);
+            cipher = Convert.ToBase64String(cipherBytes);
 
+            Console.WriteLine("Challenge: {0} with lengh {1}", cipher, cipherBytes.Length);
 
+            var serverCert = new X509Certificate2(pfxFile, "123");
+            var pvkRSA = serverCert.GetRSAPrivateKey();
 
+            contentBytes = pvkRSA.Decrypt(cipherBytes, RSAEncryptionPadding.OaepSHA1);
+            content = Encoding.UTF8.GetString(contentBytes);
 
+            Console.WriteLine(string.Format("Challenge accepted, you just said \"{0}\" (I'm the key owner)", content));
 
+            /// Client will nominate an asyn key from now on
+            ///     - Using the same mechanism
 
+            contentBytes = new byte[key.Length + iv.Length];
+            key.CopyTo(contentBytes, 0);
+            iv.CopyTo(contentBytes, key.Length);
+            content = Convert.ToBase64String(contentBytes);
 
+            cipherBytes = cerRSA.Encrypt(contentBytes, RSAEncryptionPadding.OaepSHA1);
+            cipher = Convert.ToBase64String(cipherBytes);
 
+            Console.WriteLine("key planned: {0}", content);
 
+            contentBytes = pvkRSA.Decrypt(cipherBytes, RSAEncryptionPadding.OaepSHA1);
+            content = Convert.ToBase64String(contentBytes);
 
+            var serverKey = new byte[key.Length];
+            var serverIV = new byte[iv.Length];
 
+            Array.Copy(contentBytes, serverKey, 32);
+            Array.Copy(contentBytes, 32, serverIV, 0, 16);
+
+            Console.WriteLine("key confirm: {0}", content);
+
+            /// Now going to send the detail information text between client and server
+            /// 
+
+            content = "client said: it's a sceret conversation.";
+            contentBytes = Encoding.UTF8.GetBytes(content);
+
+            /// Instead of using encoding, contentBytes should be the cipherBytes 
+            ///     created by AesManaged. Becase now key and iv are both known to each parties
+
+            var hashBytes = SHA1.Create().ComputeHash(contentBytes);
+            var serverSignature = pvkRSA.SignHash(hashBytes, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
+
+            /// Client will:
+            ///     - Received contentBytes and compute the hash the same way
+
+            var clientComputedHashBytes = SHA1.Create().ComputeHash(contentBytes);
+            var authenticated = pvkRSA.VerifyHash(clientComputedHashBytes, serverSignature, HashAlgorithmName.SHA1, RSASignaturePadding.Pkcs1);
+
+            Console.WriteLine(string.Format("Authentication of this content: {0}", authenticated));
+
+            /// This marks the end of imitation of SSL under the dispatch of X509-standard PPK info
+            ///     - Only private key owner can sigh and declare the content's Confidentiality, Integrity and Availability
+            ///     - Public key can continuously used to verify the signature from private key owner
+            ///     - If both part must be involved in authentication, exchange of both certs is needed
 
         }
     }
